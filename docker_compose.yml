@@ -1,0 +1,112 @@
+version: '3.4'
+services:
+  ubuntu:
+    image: ubuntu:latest
+    container_name: ubuntu_container
+    volumes:
+      - ./pg_data/${DATA_FOLDER:-db_data}:/var/lib/postgresql/data
+      - ./pg_data/backup:/backup
+      - ./pg_data/archive:/archive
+      - ./pg_data:/pg_data
+      - ./kafka_data/codes:/codes
+    command: tail -f /dev/null
+  postgressql:
+    container_name: postgressql
+    hostname: postgres
+    image: postgres:${PG_VERSION:-16}
+    volumes:
+      - ./pg_data/${DATA_FOLDER:-db_data}:/var/lib/postgresql/data
+      - ./pg_data/postgres-init:/docker-entrypoint-initdb.d  # Mounting the init script
+      - ./pg_data/backup:/backup
+      - ./pg_data/archive:/archive
+      - ./pg_data/tblspace:/tblspace
+      - ./pg_data:/pg_data
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASS:-postgres123}
+      - POSTGRES_USER=${DB_USER:-postgres}
+      - POSTGRES_DB=${DB_NAME:-dblab}
+      - POSTGRES_HOST_AUTH_METHOD=trust
+    networks:
+      - services
+    restart: on-failure:10
+    ports:
+      - ${PORT:-5432}:5432
+# volumes:
+#   metadata_data: {}
+
+
+  # pgadmin:
+  #   # https://www.pgadmin.org/docs/pgadmin4/latest/container_deployment.html
+  #   container_name: pgadmin4
+  #   hostname: pgadmin4
+  #   image: dpage/pgadmin4
+  #   restart: always
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@admin.com
+  #     PGADMIN_DEFAULT_PASSWORD: pgadmin123
+  #   volumes:
+  #     #- ./pgadmin_data:/data
+  #     - ./ pgadmin-data:/var/lib/pgadmin
+  #   ports:
+  #     - "5050:80"
+  #   networks:
+  #     - services 
+  zookeeper:
+    image: confluentinc/cp-zookeeper:${CP_VERSION:-latest}
+    hostname: kafka-zookeeper
+    container_name: kafka-zookeeper
+    ports:
+      - "2182:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - services
+    restart: on-failure:10
+    # restart: always
+    # chown -R 1000:1000 ./zoo
+    volumes: 
+      - ./kafka_volume/zoo/data:/var/lib/zookeeper/data:z
+      - ./kafka_volume/zoo/log:/var/lib/zookeeper/log:z
+
+  broker:
+    image: confluentinc/cp-kafka:${CP_VERSION:-latest}
+    hostname: kafka-broker
+    container_name: kafka-broker
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'kafka-zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: EXTERNAL:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: EXTERNAL://localhost:9092,INTERNAL://kafka-broker:29092
+      KAFKA_LISTENERS: EXTERNAL://:9092,INTERNAL://:29092
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka-broker:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: 'true'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+    networks:
+      - services
+    # restart: always
+    restart: on-failure:10
+
+    # chown -R 1000:1000 ./broker
+    volumes: 
+      - ./kafka_volume/broker/data:/var/lib/kafka/data:z
+      - ./kafka_data/codes:/codes
+  
+networks: 
+  services:
+    name: ${APP_NAME:-anisa}_network
